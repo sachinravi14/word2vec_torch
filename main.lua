@@ -39,11 +39,11 @@ cmd:option("-stream", config.stream)
 params = cmd:parse(arg)
 
 for param, value in pairs(params) do
-    config[param] = value
+  config[param] = value
 end
 
 for i,j in pairs(config) do
-    print(i..": "..j)
+  print(i..": "..j)
 end
 -- Train model
 m = Word2Vec(config)
@@ -51,7 +51,7 @@ m:build_vocab(config.corpus)
 m:build_table()
 
 for k = 1, config.epochs do
-    m.lr = config.lr -- reset learning rate at each epoch
-    m:train_model(config.corpus)
+  m.lr = config.lr -- reset learning rate at each epoch
+  m:train_model(config.corpus)
 end
 m:print_sim_words({"the","he","can"},5)
