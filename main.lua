@@ -25,17 +25,17 @@ config.stream = 1 -- 1 = stream from hard drive 0 = copy to memory first
 
 -- Parse input arguments
 cmd = torch.CmdLine()
-cmd:option("-corpus", config.corpus)
-cmd:option("-window", config.window)
-cmd:option("-minfreq", config.minfreq)
-cmd:option("-dim", config.dim)
-cmd:option("-lr", config.lr)
-cmd:option("-min_lr", config.min_lr)
-cmd:option("-neg_samples", config.neg_samples)
-cmd:option("-table_size", config.table_size)
-cmd:option("-epochs", config.epochs)
-cmd:option("-gpu", config.gpu)
-cmd:option("-stream", config.stream)
+cmd:option("--corpus", config.corpus)
+cmd:option("--window", config.window)
+cmd:option("--minfreq", config.minfreq)
+cmd:option("--dim", config.dim)
+cmd:option("--lr", config.lr)
+cmd:option("--min_lr", config.min_lr)
+cmd:option("--neg_samples", config.neg_samples)
+cmd:option("--table_size", config.table_size)
+cmd:option("--epochs", config.epochs)
+cmd:option("--gpu", config.gpu)
+cmd:option("--stream", config.stream)
 params = cmd:parse(arg)
 
 for param, value in pairs(params) do
