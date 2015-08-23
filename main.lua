@@ -19,7 +19,7 @@ config.neg_samples = 5 -- number of negative samples for each positive sample
 config.minfreq = 10 --threshold for vocab frequency
 config.lr = 0.025 -- initial learning rate
 config.min_lr = 0.001 -- min learning rate
-config.epochs = 3 -- number of epochs to train
+config.epochs = 1 -- number of epochs to train
 config.gpu = 0 -- 1 = use gpu, 0 = use cpu
 config.stream = 1 -- 1 = stream from hard drive 0 = copy to memory first
 
@@ -36,6 +36,9 @@ cmd:option("--table_size", config.table_size)
 cmd:option("--epochs", config.epochs)
 cmd:option("--gpu", config.gpu)
 cmd:option("--stream", config.stream)
+cmd:option("--snapshot", '')
+cmd:option("--model_info_loc", '')
+
 params = cmd:parse(arg)
 
 for param, value in pairs(params) do
@@ -55,3 +58,5 @@ for k = 1, config.epochs do
   m:train_model(config.corpus)
 end
 m:print_sim_words({"the","he","can"},5)
+
+m:save_model(params.model_info_loc, params.snapshot)

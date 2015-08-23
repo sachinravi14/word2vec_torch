@@ -29,6 +29,17 @@ function Word2Vec:__init(config)
   self.total_count = 0
 end
 
+function Word2Vec:load(model_info, snapshot) 
+  self.vocab = model_info.vocab
+  self.index2word = model_info.index2word
+  self.word2index = model_info.word2index
+  self.total_count = model_info.total_count
+
+  self.w2v = torch.load(snapshot) 
+  self.context_vecs = self.w2v.modules[1].modules[1]
+  self.word_vecs = self.w2v.modules[1].modules[2]
+end
+
 -- move to cuda
 function Word2Vec:cuda()
   require("cunn")
@@ -46,15 +57,15 @@ function Word2Vec:build_vocab(corpus)
   local f = io.open(corpus, "r")
   local n = 1
   for line in f:lines() do
-      for _, word in ipairs(self:split(line)) do
-        self.total_count = self.total_count + 1
-        if self.vocab[word] == nil then
-          self.vocab[word] = 1	 
-        else
-          self.vocab[word] = self.vocab[word] + 1
-        end
+    for _, word in ipairs(self:split(line)) do
+      self.total_count = self.total_count + 1
+      if self.vocab[word] == nil then
+        self.vocab[word] = 1	 
+      else
+        self.vocab[word] = self.vocab[word] + 1
       end
-      n = n + 1
+    end
+    n = n + 1
   end
   f:close()
   -- Delete words that do not meet the minfreq threshold and create word indices
@@ -94,14 +105,14 @@ function Word2Vec:build_table()
   local word_index = 1
   local word_prob = self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
   for idx = 1, self.table_size do
-      self.table[idx] = word_index
-      if idx / self.table_size > word_prob then
-          word_index = word_index + 1
-          word_prob = word_prob + self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
-      end
-      if word_index > self.vocab_size then
-          word_index = word_index - 1
-      end
+    self.table[idx] = word_index
+    if idx / self.table_size > word_prob then
+        word_index = word_index + 1
+        word_prob = word_prob + self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
+    end
+    if word_index > self.vocab_size then
+        word_index = word_index - 1
+    end
   end
   print(string.format("Done in %.2f seconds.", sys.clock() - start))
 end
@@ -121,11 +132,11 @@ function Word2Vec:sample_contexts(context)
   self.contexts[1] = context
   local i = 0
   while i < self.neg_samples do
-      neg_context = self.table[torch.random(self.table_size)]
-      if context ~= neg_context then
-        self.contexts[i+2] = neg_context
-        i = i + 1
-      end
+    neg_context = self.table[torch.random(self.table_size)]
+    if context ~= neg_context then
+      self.contexts[i+2] = neg_context
+      i = i + 1
+    end
   end
 end
 
@@ -137,29 +148,30 @@ function Word2Vec:train_stream(corpus)
   local c = 0
   f = io.open(corpus, "r")
   for line in f:lines() do
-      sentence = self:split(line)
-      for i, word in ipairs(sentence) do
-          word_idx = self.word2index[word]
-          if word_idx ~= nil then -- word exists in vocab
-              local reduced_window = torch.random(self.window) -- pick random window size
-              self.word[1] = word_idx -- update current word
-              for j = i - reduced_window, i + reduced_window do -- loop through contexts
-                  local context = sentence[j]
-                  if context ~= nil and j ~= i then -- possible context
-                      context_idx = self.word2index[context]
-                      if context_idx ~= nil then -- valid context
-                          self:sample_contexts(context_idx) -- update pos/neg contexts
-                          self:train_pair(self.word, self.contexts) -- train word context pair
-                          c = c + 1
-                          self.lr = math.max(self.min_lr, self.lr + self.decay) 
-                          if c % 100000 ==0 then
-                              print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
-                          end
-                      end
-                  end
-              end		
+    sentence = self:split(line)
+    for i, word in ipairs(sentence) do
+      word_idx = self.word2index[word]
+      if word_idx ~= nil then -- word exists in vocab
+        local reduced_window = torch.random(self.window) -- pick random window size
+        self.word[1] = word_idx -- update current word
+        for j = i - reduced_window, i + reduced_window do -- loop through contexts
+          local context = sentence[j]
+          if context ~= nil and j ~= i then -- possible context
+            context_idx = self.word2index[context]
+            if context_idx ~= nil then -- valid context
+              self:sample_contexts(context_idx) -- update pos/neg contexts
+              self:train_pair(self.word, self.contexts) -- train word context pair
+              c = c + 1
+              self.lr = math.max(self.min_lr, self.lr + self.decay) 
+              if c % 100000 ==0 then
+                  print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
+              end
+            end
           end
+        end		
       end
+    end
+    if c > 300000 then break end
   end
 end
 
@@ -175,17 +187,8 @@ end
 -- Return the k-nearest words to a word or a vector based on cosine similarity
 -- w can be a string such as "king" or a vector for ("king" - "queen" + "man")
 function Word2Vec:get_sim_words(w, k)
-  if self.word_vecs_norm == nil then
-      self.word_vecs_norm = self:normalize(self.word_vecs.weight:double())
-  end
-  if type(w) == "string" then
-      if self.word2index[w] == nil then
-          print("'"..w.."' does not exist in vocabulary.")
-          return nil
-      else
-          w = self.word_vecs_norm[self.word2index[w]]
-      end
-  end
+  if type(w) == "string" then w = self:get_vector(w) end
+    
   local sim = torch.mv(self.word_vecs_norm, w)
   sim, idx = torch.sort(-sim)
   local r = {}
@@ -195,16 +198,32 @@ function Word2Vec:get_sim_words(w, k)
   return r
 end
 
+function Word2Vec:get_vector(w)
+  if self.word_vecs_norm == nil then
+      self.word_vecs_norm = self:normalize(self.word_vecs.weight:double())
+  end
+  if type(w) == "string" then
+    if self.word2index[w] == nil then
+      print("'"..w.."' does not exist in vocabulary.")
+      return nil
+    else
+      w = self.word_vecs_norm[self.word2index[w]]
+    end
+  end
+
+  return w
+end
+
 -- print similar words
 function Word2Vec:print_sim_words(words, k)
   for i = 1, #words do
-      r = self:get_sim_words(words[i], k)
-      if r ~= nil then
-          print("-------"..words[i].."-------")
-          for j = 1, k do
-              print(string.format("%s, %.4f", r[j][1], r[j][2]))
-          end
+    r = self:get_sim_words(words[i], k)
+    if r ~= nil then
+      print("-------"..words[i].."-------")
+      for j = 1, k do
+        print(string.format("%s, %.4f", r[j][1], r[j][2]))
       end
+    end
   end
 end
 
@@ -215,7 +234,7 @@ function Word2Vec:split(input, sep)
   end
   local t = {}; local i = 1
   for str in string.gmatch(input, "([^"..sep.."]+)") do
-      t[i] = str; i = i + 1
+    t[i] = str; i = i + 1
   end
   return t
 end
@@ -229,31 +248,31 @@ function Word2Vec:preload_data(corpus)
   f = io.open(corpus, "r")
   self.train_words = {}; self.train_contexts = {}
   for line in f:lines() do
-      sentence = self:split(line)
-      for i, word in ipairs(sentence) do
-          word_idx = self.word2index[word]
-          if word_idx ~= nil then -- word exists in vocab
-              local reduced_window = torch.random(self.window) -- pick random window size
-              self.word[1] = word_idx -- update current word
-              for j = i - reduced_window, i + reduced_window do -- loop through contexts
-                  local context = sentence[j]
-                  if context ~= nil and j ~= i then -- possible context
-                      context_idx = self.word2index[context]
-                      if context_idx ~= nil then -- valid context
-                          c = c + 1
-                          self:sample_contexts(context_idx) -- update pos/neg contexts
-                          if self.gpu==1 then
-                              self.train_words[c] = self.word:clone():cuda()
-                              self.train_contexts[c] = self.contexts:clone():cuda()
-                          else
-                              self.train_words[c] = self.word:clone()
-                              self.train_contexts[c] = self.contexts:clone()
-                          end
-                      end
-                  end
-              end	      
+    sentence = self:split(line)
+    for i, word in ipairs(sentence) do
+      word_idx = self.word2index[word]
+      if word_idx ~= nil then -- word exists in vocab
+        local reduced_window = torch.random(self.window) -- pick random window size
+        self.word[1] = word_idx -- update current word
+        for j = i - reduced_window, i + reduced_window do -- loop through contexts
+          local context = sentence[j]
+          if context ~= nil and j ~= i then -- possible context
+            context_idx = self.word2index[context]
+            if context_idx ~= nil then -- valid context
+              c = c + 1
+              self:sample_contexts(context_idx) -- update pos/neg contexts
+              if self.gpu==1 then
+                self.train_words[c] = self.word:clone():cuda()
+                self.train_contexts[c] = self.contexts:clone():cuda()
+              else
+                self.train_words[c] = self.word:clone()
+                self.train_contexts[c] = self.contexts:clone()
+              end
+            end
           end
+        end	      
       end
+    end
   end
   print(string.format("%d word-contexts processed in %.2f seconds", c, sys.clock() - start))
 end
@@ -262,23 +281,32 @@ end
 function Word2Vec:train_mem()
   local start = sys.clock()
   for i = 1, #self.train_words do
-      self:train_pair(self.train_words[i], self.train_contexts[i])
-      self.lr = math.max(self.min_lr, self.lr + self.decay)
-      if i%100000==0 then
-          print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", i, sys.clock() - start, self.lr))
-      end
+    self:train_pair(self.train_words[i], self.train_contexts[i])
+    self.lr = math.max(self.min_lr, self.lr + self.decay)
+    if i%100000==0 then
+      print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", i, sys.clock() - start, self.lr))
+    end
   end    
 end
 
 -- train the model using config parameters
 function Word2Vec:train_model(corpus)
   if self.gpu==1 then
-      self:cuda()
+    self:cuda()
   end
   if self.stream==1 then
-      self:train_stream(corpus)
+    self:train_stream(corpus)
   else
-      self:preload_data(corpus)
-self:train_mem()
+    self:preload_data(corpus)
+    self:train_mem()
   end
+end
+
+function Word2Vec:save_model(model_info_loc, snapshot)
+  -- write model info 
+  local model_info = {vocab=self.vocab, index2word=self.index2word, word2index=self.word2index, total_count=self.total_count}
+  torch.save(model_info_loc, model_info)
+
+  -- save model as snapshot
+  torch.save(snapshot, self.w2v)
 end
