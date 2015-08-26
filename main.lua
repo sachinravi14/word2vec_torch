@@ -35,9 +35,10 @@ cmd:option("--neg_samples", config.neg_samples)
 cmd:option("--table_size", config.table_size)
 cmd:option("--epochs", config.epochs)
 cmd:option("--gpu", config.gpu)
+cmd:option("--gpu_no", '') 
 cmd:option("--stream", config.stream)
 cmd:option("--snapshot", '')
-cmd:option("--model_info_loc", '')
+cmd:option("--model_info", '')
 
 params = cmd:parse(arg)
 
@@ -55,8 +56,8 @@ m:build_table()
 
 for k = 1, config.epochs do
   m.lr = config.lr -- reset learning rate at each epoch
-  m:train_model(config.corpus)
+  m:train_model(config.corpus, params.gpu_no)
 end
 m:print_sim_words({"the","he","can"},5)
 
-m:save_model(params.model_info_loc, params.snapshot)
+m:save_model(params.model_info, params.snapshot)

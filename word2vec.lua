@@ -4,6 +4,7 @@ Class for word2vec with skipgram and negative sampling
 
 require("sys")
 require("nn")
+require 'cunn'
 
 local Word2Vec = torch.class("Word2Vec")
 
@@ -29,11 +30,20 @@ function Word2Vec:__init(config)
   self.total_count = 0
 end
 
-function Word2Vec:load(model_info, snapshot) 
+function Word2Vec:load_model_info(model_info)
+  model_info = torch.load(model_info)
   self.vocab = model_info.vocab
   self.index2word = model_info.index2word
+  self.vocab_size = #self.index2word
   self.word2index = model_info.word2index
+  self.table = model_info.table
   self.total_count = model_info.total_count
+end
+
+function Word2Vec:load(model_info, snapshot, gpu_no)
+  self:load_model_info(model_info)
+  
+  cutorch.setDevice(gpu_no + 1)
 
   self.w2v = torch.load(snapshot) 
   self.context_vecs = self.w2v.modules[1].modules[1]
@@ -42,7 +52,6 @@ end
 
 -- move to cuda
 function Word2Vec:cuda()
-  require("cunn")
   self.word = self.word:cuda()
   self.contexts = self.contexts:cuda()
   self.labels = self.labels:cuda()
@@ -80,17 +89,25 @@ function Word2Vec:build_vocab(corpus)
   self.vocab_size = #self.index2word
   print(string.format("%d words and %d sentences processed in %.2f seconds.", self.total_count, n, sys.clock() - start))
   print(string.format("Vocab size after eliminating words occuring less than %d times: %d", self.minfreq, self.vocab_size))
+
+  -- initalize word2vec model  
+  self.w2v = self:initialize_model() 
+end
+
+function Word2Vec:initialize_model()
   -- initialize word/context embeddings now that vocab size is known
   self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
   self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
   self.word_vecs:reset(0.25); self.context_vecs:reset(0.25) -- rescale N(0,1)
-  self.w2v = nn.Sequential()
-  self.w2v:add(nn.ParallelTable())
-  self.w2v.modules[1]:add(self.context_vecs)
-  self.w2v.modules[1]:add(self.word_vecs)
-  self.w2v:add(nn.MM(false, true)) -- dot prod and sigmoid to get probabilities
-  self.w2v:add(nn.Sigmoid())
+  local model = nn.Sequential()
+  model:add(nn.ParallelTable())
+  model.modules[1]:add(self.context_vecs)
+  model.modules[1]:add(self.word_vecs)
+  model:add(nn.MM(false, true)) -- dot prod and sigmoid to get probabilities
+  model:add(nn.Sigmoid())
   self.decay = (self.min_lr-self.lr)/(self.total_count*self.window)
+
+  return model
 end
 
 -- Build a table of unigram frequencies from which to obtain negative samples
@@ -120,6 +137,8 @@ end
 -- Train on word context pairs
 function Word2Vec:train_pair(word, contexts)
   local p = self.w2v:forward({contexts, word})
+  
+  -- Backward phase is always only through word2vec model
   local loss = self.criterion:forward(p, self.labels)
   local dl_dp = self.criterion:backward(p, self.labels)
   self.w2v:zeroGradParameters()
@@ -171,7 +190,6 @@ function Word2Vec:train_stream(corpus)
         end		
       end
     end
-    if c > 300000 then break end
   end
 end
 
@@ -188,7 +206,6 @@ end
 -- w can be a string such as "king" or a vector for ("king" - "queen" + "man")
 function Word2Vec:get_sim_words(w, k)
   if type(w) == "string" then w = self:get_vector(w) end
-    
   local sim = torch.mv(self.word_vecs_norm, w)
   sim, idx = torch.sort(-sim)
   local r = {}
@@ -200,13 +217,13 @@ end
 
 function Word2Vec:get_vector(w)
   if self.word_vecs_norm == nil then
-      self.word_vecs_norm = self:normalize(self.word_vecs.weight:double())
+    self.word_vecs_norm = self:normalize(self.word_vecs.weight:double())
   end
   if type(w) == "string" then
     if self.word2index[w] == nil then
       print("'"..w.."' does not exist in vocabulary.")
       return nil
-    else
+    else  
       w = self.word_vecs_norm[self.word2index[w]]
     end
   end
@@ -290,8 +307,11 @@ function Word2Vec:train_mem()
 end
 
 -- train the model using config parameters
-function Word2Vec:train_model(corpus)
+function Word2Vec:train_model(corpus, gpu_no)
   if self.gpu==1 then
+    print('gpu: '.. gpu_no)
+    require("cunn")
+    cutorch.setDevice(gpu_no + 1)
     self:cuda()
   end
   if self.stream==1 then
@@ -304,7 +324,7 @@ end
 
 function Word2Vec:save_model(model_info_loc, snapshot)
   -- write model info 
-  local model_info = {vocab=self.vocab, index2word=self.index2word, word2index=self.word2index, total_count=self.total_count}
+  local model_info = {vocab=self.vocab, index2word=self.index2word, word2index=self.word2index, total_count=self.total_count, table=self.table}
   torch.save(model_info_loc, model_info)
 
   -- save model as snapshot
