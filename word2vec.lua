@@ -5,7 +5,9 @@ Class for word2vec with skipgram and negative sampling
 require("sys")
 require("nn")
 require 'cunn'
+require 'util'
 
+local tds = require 'tds'
 local Word2Vec = torch.class("Word2Vec")
 
 function Word2Vec:__init(config)
@@ -24,9 +26,9 @@ function Word2Vec:__init(config)
   self.min_lr = config.min_lr
   self.alpha = config.alpha
   self.table_size = config.table_size 
-  self.vocab = {}
-  self.index2word = {}
-  self.word2index = {}
+  self.vocab = tds.hash()
+  self.index2word = tds.hash()
+  self.word2index = tds.hash()
   self.total_count = 0
 end
 
@@ -61,7 +63,7 @@ end
 
 -- Build vocab frequency, word2index, and index2word from input file
 function Word2Vec:build_vocab(corpus)
-  print("Building vocabulary...")
+  print_f("Building vocabulary...")
   local start = sys.clock()
   local f = io.open(corpus, "r")
   local n = 1
@@ -87,8 +89,8 @@ function Word2Vec:build_vocab(corpus)
     end
   end
   self.vocab_size = #self.index2word
-  print(string.format("%d words and %d sentences processed in %.2f seconds.", self.total_count, n, sys.clock() - start))
-  print(string.format("Vocab size after eliminating words occuring less than %d times: %d", self.minfreq, self.vocab_size))
+  print_f(string.format("%d words and %d sentences processed in %.2f seconds.", self.total_count, n, sys.clock() - start))
+  print_f(string.format("Vocab size after eliminating words occuring less than %d times: %d", self.minfreq, self.vocab_size))
 
   -- initalize word2vec model  
   self.w2v = self:initialize_model() 
@@ -114,7 +116,7 @@ end
 function Word2Vec:build_table()
   local start = sys.clock()
   local total_count_pow = 0
-  print("Building a table of unigram frequencies... ")
+  print_f("Building a table of unigram frequencies... ")
   for _, count in pairs(self.vocab) do
     total_count_pow = total_count_pow + count^self.alpha
   end   
@@ -131,7 +133,7 @@ function Word2Vec:build_table()
         word_index = word_index - 1
     end
   end
-  print(string.format("Done in %.2f seconds.", sys.clock() - start))
+  print_f(string.format("Done in %.2f seconds.", sys.clock() - start))
 end
 
 -- Train on word context pairs
@@ -162,7 +164,7 @@ end
 -- Train on sentences that are streamed from the hard drive
 -- Check train_mem function to train from memory (after pre-loading data into tensor)
 function Word2Vec:train_stream(corpus)
-  print("Training...")
+  print_f("Training...")
   local start = sys.clock()
   local c = 0
   f = io.open(corpus, "r")
@@ -183,7 +185,7 @@ function Word2Vec:train_stream(corpus)
               c = c + 1
               self.lr = math.max(self.min_lr, self.lr + self.decay) 
               if c % 100000 ==0 then
-                  print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
+                  print_f(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
               end
             end
           end
@@ -221,7 +223,7 @@ function Word2Vec:get_vector(w)
   end
   if type(w) == "string" then
     if self.word2index[w] == nil then
-      print("'"..w.."' does not exist in vocabulary.")
+      print_f("'"..w.."' does not exist in vocabulary.")
       return nil
     else  
       w = self.word_vecs_norm[self.word2index[w]]
@@ -231,14 +233,14 @@ function Word2Vec:get_vector(w)
   return w
 end
 
--- print similar words
+-- print_f similar words
 function Word2Vec:print_sim_words(words, k)
   for i = 1, #words do
     r = self:get_sim_words(words[i], k)
     if r ~= nil then
-      print("-------"..words[i].."-------")
+      print_f("-------"..words[i].."-------")
       for j = 1, k do
-        print(string.format("%s, %.4f", r[j][1], r[j][2]))
+        print_f(string.format("%s, %.4f", r[j][1], r[j][2]))
       end
     end
   end
@@ -259,7 +261,7 @@ end
 -- pre-load data as a torch tensor instead of streaming it. this requires a lot of memory, 
 -- so if the corpus is huge you should partition into smaller sets
 function Word2Vec:preload_data(corpus)
-  print("Preloading training corpus into tensors (Warning: this takes a lot of memory)")
+  print_f("Preloading training corpus into tensors (Warning: this takes a lot of memory)")
   local start = sys.clock()
   local c = 0
   f = io.open(corpus, "r")
@@ -291,7 +293,7 @@ function Word2Vec:preload_data(corpus)
       end
     end
   end
-  print(string.format("%d word-contexts processed in %.2f seconds", c, sys.clock() - start))
+  print_f(string.format("%d word-contexts processed in %.2f seconds", c, sys.clock() - start))
 end
 
 -- train from memory. this is needed to speed up GPU training
@@ -301,7 +303,7 @@ function Word2Vec:train_mem()
     self:train_pair(self.train_words[i], self.train_contexts[i])
     self.lr = math.max(self.min_lr, self.lr + self.decay)
     if i%100000==0 then
-      print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", i, sys.clock() - start, self.lr))
+      print_f(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", i, sys.clock() - start, self.lr))
     end
   end    
 end
@@ -309,7 +311,7 @@ end
 -- train the model using config parameters
 function Word2Vec:train_model(corpus, gpu_no)
   if self.gpu==1 then
-    print('gpu: '.. gpu_no)
+    print_f('gpu: '.. gpu_no)
     require("cunn")
     cutorch.setDevice(gpu_no + 1)
     self:cuda()
